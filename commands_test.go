@@ -460,7 +460,7 @@ var _ = Describe("Commands", func() {
 			}
 
 			// read the defaults to set them back later
-			for setting, _ := range expected {
+			for setting := range expected {
 				val, err := client.ConfigGet(ctx, setting).Result()
 				Expect(err).NotTo(HaveOccurred())
 				defaults[setting] = val[setting]
@@ -6769,6 +6769,36 @@ var _ = Describe("Commands", func() {
 				Expect(res).To(Equal([]redis.XInfoGroup{
 					{Name: "group1", Consumers: 2, Pending: 3, LastDeliveredID: "3-0", EntriesRead: 3},
 					{Name: "group2", Consumers: 1, Pending: 2, LastDeliveredID: "3-0", EntriesRead: 3},
+				}))
+			})
+
+			It("should return -1 for nil lag in XINFO GROUPS", func() {
+				_, err := client.XAdd(ctx, &redis.XAddArgs{Stream: "s", ID: "0-1", Values: []string{"foo", "1"}}).Result()
+				Expect(err).NotTo(HaveOccurred())
+
+				client.XAdd(ctx, &redis.XAddArgs{Stream: "s", ID: "0-2", Values: []string{"foo", "2"}})
+				Expect(err).NotTo(HaveOccurred())
+				client.XAdd(ctx, &redis.XAddArgs{Stream: "s", ID: "0-3", Values: []string{"foo", "3"}})
+				Expect(err).NotTo(HaveOccurred())
+
+				err = client.XGroupCreate(ctx, "s", "g", "0").Err()
+				Expect(err).NotTo(HaveOccurred())
+				err = client.XReadGroup(ctx, &redis.XReadGroupArgs{Group: "g", Consumer: "c", Streams: []string{"s", ">"}, Count: 1, Block: -1, NoAck: false}).Err()
+				Expect(err).NotTo(HaveOccurred())
+
+				client.XDel(ctx, "s", "0-2")
+
+				res, err := client.XInfoGroups(ctx, "s").Result()
+				Expect(err).NotTo(HaveOccurred())
+				Expect(res).To(Equal([]redis.XInfoGroup{
+					{
+						Name:            "g",
+						Consumers:       1,
+						Pending:         1,
+						LastDeliveredID: "0-1",
+						EntriesRead:     1,
+						Lag:             -1, // nil lag from Redis is reported as -1
+					},
 				}))
 			})
 
